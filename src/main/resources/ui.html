@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Jira</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.7.2/Chart.bundle.js"></script>
+    <link rel="stylesheet" href="http://localhost:8080/static/datepickk.css">
+    <script src="http://localhost:8080/static/datepickk.js"></script>
+    <script src="https://code.jquery.com/jquery-3.3.1.js"
+            integrity="sha256-2Kok7MbOyxpgUVvAk/HJ2jigOSYS2auK4Pfzbm7uH60="
+            crossorigin="anonymous"></script>
+    <style>
+        #demoPicker {
+            float: left;
+        }
+        #right {
+            float: left;
+        }​
+    </style>
+</head>
+<body>
+    <div id="wrapper">
+        <div id="demoPicker" style="width:400px;height:400px">
+        </div>
+        <div id="right" style="width:1000px">
+            <select id="spaces"></select>
+            <button id="jira">jira</button>
+            <button id="fisheye">fisheye</button>
+            <button id="confluence">confluence</button>
+            <button id="display">display</button>
+            <canvas id="myChart"></canvas>
+        </div>
+    </div>
+    <script>
+        var barChartData = {}
+        var dataSource = ''
+        var demoPicker = new Datepickk({
+            container: document.querySelector('#demoPicker'),
+            inline:true,
+            range: true
+        });
+
+		document.getElementById('jira').addEventListener('click', function() {
+    		dataSource = "jira"
+		    fillSpaces(dataSource)
+		});
+
+		document.getElementById('confluence').addEventListener('click', function() {
+    		dataSource = "confluence"
+		    fillSpaces(dataSource)
+		});
+
+		document.getElementById('display').addEventListener('click', function() {
+		    var fromTo = demoPicker.selectedDates
+            $.getJSON("http://localhost:8080/data/" + dataSource + "/", function(data) {
+
+            });
+		});
+
+		function fillSpaces(source) {
+            $.getJSON("http://localhost:8080/" + source, function(data) {
+                $("#spaces").empty(); // Remove all <option> child tags.
+                $.each(data, function(index, item) { // Iterates through a collection
+                    $("#spaces").append( // Append an object to the inside of the select box
+                        $("<option></option>") // Yes you can do this.
+                            .text(item)
+                            .val(item)
+                    );
+                });
+            });
+		}
+
+		window.onload = function() {
+			var ctx = document.getElementById('canvas').getContext('2d');
+			window.myBar = new Chart(ctx, {
+				type: 'bar',
+				data: barChartData,
+				options: {
+					responsive: true,
+					legend: {
+						position: 'top'
+					},
+					title: {
+						display: true,
+						text: ''
+					}
+				}
+			});
+
+		};
+
+		document.getElementById('display').addEventListener('click', function() {
+            window.myBar.update();
+		});
+    </script>
+</body>
+</html>

@@ -11,6 +11,10 @@ import io.ktor.client.request.accept
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.headers
+import io.ktor.content.default
+import io.ktor.content.files
+import io.ktor.content.static
+import io.ktor.content.staticRootFolder
 import io.ktor.features.ContentNegotiation
 import io.ktor.gson.gson
 import io.ktor.http.ContentType
@@ -20,6 +24,7 @@ import io.ktor.routing.routing
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import kotlinx.coroutines.experimental.runBlocking
+import java.io.File
 import java.net.URLEncoder
 import java.time.Instant
 import java.time.LocalDateTime
@@ -36,10 +41,19 @@ fun main(args: Array<String>) {
             }
         }
         routing {
-            get("/spaces") {
+            get("/data/{system}/{source}/{from}/{to}") { request ->
+                call.respond(readConfluenceContentModifications(call.parameters["system"],
+                        call.parameters["from"] as Long, call.parameters["to"] as Long, requestAttributes))
+            }
+            static("static") {
+                staticRootFolder = File("/home/vasste/challenge/src/main")
+                files("resources")
+                default("resources/ui.html")
+            }
+            get("/confluence") {
                 call.respond(readConfluenceSpaces(requestAttributes))
             }
-            get("/projects") {
+            get("/jira") {
                 call.respond(readJiraProjects(requestAttributes))
             }
         }
@@ -55,6 +69,7 @@ fun main(args: Array<String>) {
 //    println(readConfluenceSpaces(requestAttributes))
     //println(readGitCommittedLines("DXLAB", start, end, requestAttributes))
 }
+
 val FISH_EYE_URL = System.getProperty("fisheye")!!
 val FISH_EYE_URL_REST = "$FISH_EYE_URL/rest-service-fe"
 val CONFLUENCE_URL = System.getProperty("confluence")!!
@@ -87,10 +102,10 @@ fun readGitCommittedLines(project: String, fromTime: Long, toTime: Long, request
 
 // confluence
 //  https://docs.atlassian.com/ConfluenceServer/rest/6.10.1/#content-getContentById
-fun readConfluenceContentModifications(space: String, fromTime: Long, toTime: Long,
+fun readConfluenceContentModifications(space: String?, fromTime: Long?, toTime: Long?,
                                        requestAttributes: Map<String, String>): Map<User, Int> {
-    val from = formatTime(fromTime)
-    val to = formatTime(toTime)
+    val from = formatTime(fromTime ?: 0)
+    val to = formatTime(toTime ?: 0)
     val query = URLEncoder.encode("space=$space and (lastmodified >= $from and lastmodified <= $to " +
             "or created >= $from and created <= $to)", "utf-8")
     val statistics = get("$CONFLUENCE_URL_REST/content/search?cql=$query&expand=version", requestAttributes)

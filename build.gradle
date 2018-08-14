@@ -18,7 +18,7 @@ dependencies {
     compile "io.ktor:ktor-client-apache:$ktorVersion"
     compile "io.ktor:ktor-client-json:$ktorVersion"
 
-    compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$ktorVersion"
+    compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinVersion"
     compile "org.jetbrains.kotlinx:kotlinx-io-jvm:$kotlinxIO"
     compile "org.jetbrains.kotlinx:kotlinx-coroutines-core:$kotlinxCoroutines"
 }
