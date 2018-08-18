@@ -23,6 +23,8 @@ import io.ktor.routing.get
 import io.ktor.routing.routing
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import kotlinx.coroutines.experimental.Deferred
+import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.runBlocking
 import java.io.File
 import java.net.URLEncoder
@@ -30,6 +32,16 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.ConcurrentHashMap
+
+val client = HttpClient(Apache) {
+    install(JsonFeature) {
+        serializer = GsonSerializer {
+            serializeNulls()
+            disableHtmlEscaping()
+        }
+    }
+}
 
 fun main(args: Array<String>) {
     val password = args[0]
@@ -41,14 +53,26 @@ fun main(args: Array<String>) {
             }
         }
         routing {
-            get("/data/{system}/{source}/{from}/{to}") { request ->
-                call.respond(readConfluenceContentModifications(call.parameters["system"],
-                        call.parameters["from"] as Long, call.parameters["to"] as Long, requestAttributes))
+            get("/jira/source/{source}/from/{from}/to/{to}") { request ->
+                call.respond(readJiraContentModifications(call.parameters["source"],
+                        long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
             }
-            static("static") {
-                staticRootFolder = File("/home/vasste/challenge/src/main")
+            get("/confluence/source/{source}/from/{from}/to/{to}") { request ->
+                    call.respond(readConfluenceContentModifications(call.parameters["source"],
+                            long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
+            }
+            get("/fisheye/source/{source}/from/{from}/to/{to}") { request ->
+                    call.respond(readFishCommittedLines(call.parameters["source"],
+                            long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
+            }
+            get("/bitbucket/project/{project}/repository/{repository}/from/{from}/to/{to}") { request ->
+                call.respond(readBitbucketCommits(call.parameters["project"], call.parameters["repository"],
+                        long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
+            }
+            static("sniffer") {
+                staticRootFolder = File(System.getProperty("path"))
                 files("resources")
-                default("resources/ui.html")
+                default("resources" + File.separator +"ui.html")
             }
             get("/confluence") {
                 call.respond(readConfluenceSpaces(requestAttributes))
@@ -56,18 +80,27 @@ fun main(args: Array<String>) {
             get("/jira") {
                 call.respond(readJiraProjects(requestAttributes))
             }
+            get("/fisheye") {
+                call.respond(readFisheyeRepositories(requestAttributes))
+            }
+            get("/bitbucket") {
+                call.respond(readBitbucketProjects(requestAttributes))
+            }
         }
     }
     server.start(wait = true)
 
     // there is a project define the most committees for a week
-//    val start = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(7)
+//    val start = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(4)
 //    val end = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(0)
 //
 //    val password = args[0]
 //    val requestAttributes = mapOf(Pair("Authorization", "Basic $password"))
-//    println(readConfluenceSpaces(requestAttributes))
-    //println(readGitCommittedLines("DXLAB", start, end, requestAttributes))
+//    runBlocking {
+//        println(readBitbucketCommits("tos", "alertmanagement",
+//                start, end, requestAttributes))
+//    }
+    //println(readFishCommittedLines("thinkpipes", start, end, requestAttributes))
 }
 
 val FISH_EYE_URL = System.getProperty("fisheye")!!
@@ -76,6 +109,8 @@ val CONFLUENCE_URL = System.getProperty("confluence")!!
 val CONFLUENCE_URL_REST = "$CONFLUENCE_URL/rest/api"
 val JIRA_URL = System.getProperty("jira")!!
 val JIRA_URL_REST = "$JIRA_URL/rest/api/2"
+val BITBUCKET_URL = System.getProperty("bitbucket")!!
+val BITBUCKET_URL_REST = "$BITBUCKET_URL/rest/api/1.0"
 const val DATA_FORMAT = "yyyy-MM-dd"
 val DATA_FORMATTER = DateTimeFormatter.ofPattern(DATA_FORMAT)!!
 
@@ -86,39 +121,64 @@ val DATA_FORMATTER = DateTimeFormatter.ofPattern(DATA_FORMAT)!!
 // https://tosfish.iteclientsys.local/rest-service-fe/revisionData-v1/changesetList/tos
 // https://tosfish.iteclientsys.local/rest-service-fe/revisionData-v1/changeset/tos/a9e174976d0586555c1d10c375e48490671d025c
 // https://tosfish.iteclientsys.local/rest-service-fe/revisionData-v1/revisionInfo/tos/?path=AdminGUI/src/main/java/com/devexperts/tos/ui/admin/riskmonitor/RiskPanel.java&revision=7f8cdb314790e65e82bc6ca1af846b7e259e88bf
-fun readGitCommittedLines(project: String, fromTime: Long, toTime: Long, requestAttributes: Map<String, String>): Map<String, Int> {
-    val from = formatTime(fromTime)
-    val to = formatTime(toTime)
-    var userLines: Map<String, Int> = mutableMapOf()
+suspend fun readFishCommittedLines(project: String?, fromTime: Long?, toTime: Long?,
+                           requestAttributes: Map<String, String>): List<UserStats> {
+    val from = formatTime(fromTime ?: 0)
+    val to = formatTime(toTime ?: 0)
+    val emailLines: MutableMap<String, Int> = mutableMapOf()
     val query = URLEncoder.encode("select revisions where date in [$from, $to) return author, linesAdded, linesRemoved", "utf-8")
-    val statistics = jO(get("$FISH_EYE_URL_REST/search-v1/queryAsRows/$project?query=$query", requestAttributes))
+    val statistics = get("$FISH_EYE_URL_REST/search-v1/queryAsRows/$project?query=$query", requestAttributes).asJsonObject
     for (row in statistics["row"] as JsonArray) {
         val item = jA(jO(row)["item"])
-        val lines = userLines.getOrDefault(item[0].asString, 0)
-        userLines = userLines.plus(Pair(item[0].asString, lines + item[1] as Int + item[2] as Int))
+        val author = item[0].asString
+        val email = author.substring(author.indexOf('<') + 1, author.length - 1)
+        emailLines[email] = emailLines.getOrDefault(email, 0) + item[1].asInt - item[2].asInt
     }
-    return userLines
+    return resolveFisheyeUsers(emailLines, requestAttributes)
+}
+
+suspend fun readFisheyeRepositories(requestAttributes: Map<String, String>): Set<String> {
+    val repositories = get("$FISH_EYE_URL_REST/repositories-v1", requestAttributes).asJsonObject["repository"].asJsonArray
+    return repositories.map { repository -> repository.asJsonObject["name"].asString }.toSet()
+}
+
+suspend fun resolveFisheyeUsers(emailLines: Map<String, Int>, requestAttributes: Map<String, String>): List<UserStats> {
+    val query = "$JIRA_URL_REST/user/search?maxResults=1000&username"
+    val emailUser: MutableMap<String, User> = ConcurrentHashMap()
+    val devexpertUsersJson = get("$query=devexperts.com", requestAttributes).asJsonArray
+    val tdaUsersJson = get("$query=tdameritrade.com", requestAttributes).asJsonArray
+    runBlocking {
+        devexpertUsersJson.map { u -> u.asJsonObject }
+                .map { user -> User(user["name"].asString, user["displayName"].asString, user["emailAddress"].asString.toLowerCase()) }
+                .forEach { u -> emailUser[u.email] = u }
+        tdaUsersJson.map { u -> u.asJsonObject }
+                .map { user -> User(user["name"].asString, user["displayName"].asString, user["emailAddress"].asString.toLowerCase()) }
+                .forEach { u -> emailUser[u.email] = u }
+    }
+
+    return emailLines.map { (e,l) ->
+        UserStats(emailUser[e.toLowerCase()] ?: User(e.toLowerCase(), e.toLowerCase()), l) }.toList()
 }
 
 // confluence
 //  https://docs.atlassian.com/ConfluenceServer/rest/6.10.1/#content-getContentById
-fun readConfluenceContentModifications(space: String?, fromTime: Long?, toTime: Long?,
-                                       requestAttributes: Map<String, String>): Map<User, Int> {
+suspend fun readConfluenceContentModifications(space: String?, fromTime: Long?, toTime: Long?,
+                                               requestAttributes: Map<String, String>): List<UserStats> {
     val from = formatTime(fromTime ?: 0)
     val to = formatTime(toTime ?: 0)
     val query = URLEncoder.encode("space=$space and (lastmodified >= $from and lastmodified <= $to " +
             "or created >= $from and created <= $to)", "utf-8")
     val statistics = get("$CONFLUENCE_URL_REST/content/search?cql=$query&expand=version", requestAttributes)
-    var writtenLines: Map<User, Int> = mutableMapOf()
+    val writtenLines: MutableMap<User, Int> = mutableMapOf()
     for (result in jA(jO(statistics)["results"])) {
         val updater = jO(jO(jO(result)["version"])["by"])
         val user = User(updater["username"].asString, updater["displayName"].asString)
-        writtenLines = writtenLines.plus(Pair(user, 1 + writtenLines.getOrDefault(user, 0)))
+        writtenLines[user] = 1 + writtenLines.getOrDefault(user, 0)
     }
-    return writtenLines
+    return writtenLines.map{ (k,v) -> UserStats(k, v) }.toList()
 }
 
-fun readConfluenceSpaces(requestAttributes: Map<String, String>): Set<String> {
+suspend fun readConfluenceSpaces(requestAttributes: Map<String, String>): Set<String> {
     val spaces = get("$CONFLUENCE_URL_REST/space?limit=300&type=global", requestAttributes).asJsonObject
     return (spaces["results"]).asJsonArray.map { result -> (result.asJsonObject)["key"].asString }.toSet()
 }
@@ -128,49 +188,104 @@ fun readConfluenceSpaces(requestAttributes: Map<String, String>): Set<String> {
 // https://docs.atlassian.com/software/jira/docs/api/REST/7.6.1/?_ga=2.49922081.602716363.1533552482-493128539.1533552482#api/2/search-search
 // https://tosjira.iteclientsys.local/rest/api/2/search
 // project = alerts project = alerts and (updated >= 2018-08-01 and  updated <= 2018-08-03 or created >= 2018-08-01 and  created <= 2018-08-03)
-fun readJiraContentModifications(project: String, fromTime: Long, toTime: Long,
-                                 requestAttributes: Map<String, String>): Map<User, Int> {
-    val from = formatTime(fromTime)
-    val to = formatTime(toTime)
-    val query = URLEncoder.encode("project=$project and (updated >= $from and updated <= $to or " +
-            "created >= $from and created <= $to)", "utf-8")
-    val statistics = get("$JIRA_URL_REST/search?jql=$query&fields=changelog&expand=changelog&maxResults=500", requestAttributes)
-    var modifiedTimes: Map<User, Int> = mutableMapOf()
+suspend fun readJiraContentModifications(project: String?, fromTime: Long?, toTime: Long?,
+                                 requestAttributes: Map<String, String>): List<UserStats> {
+    val from = formatTime(fromTime ?: 0)
+    val to = formatTime(toTime ?: 0)
+    val query = URLEncoder.encode("project=$project and (created >= $from and created <= $to)", "utf-8")
+    val statistics = get("$JIRA_URL_REST/search?jql=$query&fields=creator&maxResults=1000", requestAttributes)
+    val createdTickets: MutableMap<User, Int> = mutableMapOf()
     for(issue in jA(jO(statistics)["issues"])) {
-        for(change in jA(jO(jO(issue)["changelog"])["histories"])) {
-            val author = User(jO(jO(change)["author"])["name"].asString, jO(jO(change)["author"])["displayName"].asString)
-            modifiedTimes = modifiedTimes.plus(Pair(author, 1 + modifiedTimes.getOrDefault(author, 0)))
-        }
+        val creator = jO(jO(jO(issue)["fields"])["creator"])
+        val author = User(creator["name"].asString, creator["displayName"].asString)
+        createdTickets[author] = 1 + createdTickets.getOrDefault(author, 0)
     }
-    return modifiedTimes
+    return createdTickets.map{ (k,v) -> UserStats(k, v) }.toList()
 }
 
-fun readJiraProjects(requestAttributes: Map<String, String>): Set<String> {
+suspend fun readJiraProjects(requestAttributes: Map<String, String>): Set<String> {
     val projects = get("$JIRA_URL_REST/project", requestAttributes).asJsonArray
     return projects.map { p -> jO(p)["key"].asString }.toSet()
 }
 
-fun get(url: String, requestAttributes: Map<String, String>): JsonElement {
-    val client = HttpClient(Apache) {
-        install(JsonFeature) {
-            serializer = GsonSerializer {
-                serializeNulls()
-                disableHtmlEscaping()
-            }
+suspend fun readBitbucketProjects(requestAttributes: Map<String, String>): Set<String> {
+    val repos = blockingGet("$BITBUCKET_URL_REST/repos?limit=200", requestAttributes).asJsonObject["values"].asJsonArray
+    return repos.filter { repo -> jO(jO(repo)["project"])["type"].asString != "PERSONAL" }
+            .map { repo -> jO(jO(repo)["project"])["key"].asString + "/" + jO(repo)["slug"].asString }.toSet()
+}
+
+// https://tosgit.iteclientsys.local/rest/api/1.0/projects/tos/repos/alertmanagement/branches?limit=200
+// https://tosgit.iteclientsys.local/rest/api/1.0/projects/tos/repos/alertmanagement/commits?until=release/1934_cucumber&merges=exclude
+suspend fun readBitbucketCommits(project: String?, repository: String?, fromTime: Long?, toTime: Long?,
+                          requestAttributes: Map<String, String>): List<UserStats> {
+
+    val branches = blockingGet("$BITBUCKET_URL_REST/projects/$project/repos/$repository/branches?limit=200",
+            requestAttributes).asJsonObject["values"].asJsonArray
+    val commitUserList : MutableList<Deferred<Map<String, User>>> = ArrayList()
+    val userCommits : MutableMap<User, Int> = HashMap()
+
+    for(branch in branches) {
+        val lastCommitSHA = branch.asJsonObject["latestCommit"].asString
+        commitUserList.add(async {
+            readBranchCommits(project, repository, lastCommitSHA, fromTime, toTime, requestAttributes)
+        })
+    }
+    for(commitUser in commitUserList) {
+        for((k, u) in commitUser.await()) {
+            userCommits[u] = userCommits.getOrDefault(u, 0) + 1
         }
     }
-    return runBlocking {
-        client.get<JsonElement>(url) {
-            accept(ContentType.Application.Json)
-            headers {
-                requestAttributes.forEach { k, v -> header(k, v) }
+    return userCommits.map{ (k,v) -> UserStats(k, v) }.toList()
+}
+
+suspend fun readBranchCommits(project: String?, repository: String?, lastCommit: String, fromTime: Long?, toTime: Long?,
+                              requestAttributes: Map<String, String>): Map<String, User> {
+    var start = 0
+    val limit = 10
+    val from = fromTime?:0
+    val to = toTime?:0
+    val commitUser : MutableMap<String, User> = HashMap()
+    out@ while (true) {
+        val url = "$BITBUCKET_URL_REST/projects/$project/repos/$repository/commits?merges=exclude&limit=$limit&start=$start&until=$lastCommit"
+        val values = blockingGet(url, requestAttributes)
+        val commits = values.asJsonObject["values"].asJsonArray
+        if (commits.size() == 0 || values.asJsonObject["isLastPage"].asBoolean) break
+        for (commit in commits) {
+            val commitTime = jO(commit)["authorTimestamp"].asString.toLong()
+            if (commitTime > to) continue
+            if (commitTime < from) break@out
+            val commitUserSHA = jO(commit)["id"].asString
+            if (commitUser[commitUserSHA] == null) {
+                val author = jO(commit)["author"].asJsonObject
+                val user = User(author["name"].asString, author["displayName"].asString)
+                commitUser[commitUserSHA] = user
             }
+        }
+        start += limit
+    }
+    return commitUser
+}
+
+
+fun blockingGet(url: String, requestAttributes: Map<String, String>): JsonElement {
+    return runBlocking {
+        get(url, requestAttributes)
+    }
+}
+
+suspend fun get(url: String, requestAttributes: Map<String, String>): JsonElement {
+    return client.get(url) {
+        accept(ContentType.Application.Json)
+        headers {
+            requestAttributes.forEach { k, v -> header(k, v) }
         }
     }
 }
 
-data class User(val id: String, val name: String)
+data class User(val id: String, val name: String, val email: String = "")
+data class UserStats(val user: User, val stats: Int)
 
 fun jO(any: Any): JsonObject = any as JsonObject
 fun jA(any: Any): JsonArray = any as JsonArray
+fun long(value: String?) = value?.toLong() ?: 0
 fun formatTime(time: Long) = DATA_FORMATTER.format(LocalDateTime.ofInstant(Instant.ofEpochMilli(time), ZoneOffset.UTC))

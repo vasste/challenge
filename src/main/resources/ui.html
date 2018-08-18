@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Jira</title>
+    <title>Sniffer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.7.2/Chart.bundle.js"></script>
-    <link rel="stylesheet" href="http://localhost:8080/static/datepickk.css">
-    <script src="http://localhost:8080/static/datepickk.js"></script>
+    <link rel="stylesheet" href="http://localhost:8080/sniffer/datepickk.css">
+    <script src="http://localhost:8080/sniffer/datepickk.js"></script>
     <script src="https://code.jquery.com/jquery-3.3.1.js"
             integrity="sha256-2Kok7MbOyxpgUVvAk/HJ2jigOSYS2auK4Pfzbm7uH60="
             crossorigin="anonymous"></script>
@@ -20,48 +20,89 @@
 </head>
 <body>
     <div id="wrapper">
-        <div id="demoPicker" style="width:400px;height:400px">
+        <div id="demoPicker" style="width:300px;height:300px">
         </div>
         <div id="right" style="width:1000px">
-            <select id="spaces"></select>
+            <select id="source"></select>
             <button id="jira">jira</button>
             <button id="fisheye">fisheye</button>
+            <button id="bitbucket">bitbucket</button>
             <button id="confluence">confluence</button>
             <button id="display">display</button>
-            <canvas id="myChart"></canvas>
+            <canvas id="statistics" style="width:900px;height:800px"></canvas>
         </div>
     </div>
     <script>
-        var barChartData = {}
-        var dataSource = ''
-        var demoPicker = new Datepickk({
-            container: document.querySelector('#demoPicker'),
-            inline:true,
-            range: true
-        });
+        var demoPicker = new Datepickk({ container: $('#demoPicker')[0], inline:true, range: true });
+        window.chartColors = {
+            red: 'rgb(255, 99, 132)',
+            orange: 'rgb(255, 159, 64)',
+            yellow: 'rgb(255, 205, 86)',
+            green: 'rgb(75, 192, 192)',
+            blue: 'rgb(54, 162, 235)',
+            purple: 'rgb(153, 102, 255)',
+            grey: 'rgb(201, 203, 207)'
+        };
+        var color = Chart.helpers.color;
+        window.barChartData = {
+            labels: [],
+            datasets: []
+        };
 
-		document.getElementById('jira').addEventListener('click', function() {
-    		dataSource = "jira"
-		    fillSpaces(dataSource)
-		});
+        click("bitbucket");
+        click("fisheye");
+        click("confluence");
+        click("jira");
 
-		document.getElementById('confluence').addEventListener('click', function() {
-    		dataSource = "confluence"
-		    fillSpaces(dataSource)
-		});
-
-		document.getElementById('display').addEventListener('click', function() {
-		    var fromTo = demoPicker.selectedDates
-            $.getJSON("http://localhost:8080/data/" + dataSource + "/", function(data) {
-
+        function click(id) {
+            $('#' + id).click(function() {
+                window.system = id;
+                fillSpaces(system);
             });
+        }
+
+        $('#display').click(function() {
+		    if (demoPicker.selectedDates.length > 1) {
+                var source = $('#source').val();
+                var from = demoPicker.selectedDates[0].getTime();
+                var to = demoPicker.selectedDates[1].getTime();
+                var url = `http://localhost:8080/${window.system}/source/${source}/from/${from}/to/${to}`;
+                if (window.system === "bitbucket") {
+                    var projectRepo = source.split("/");
+                    var project = projectRepo[0];
+                    var repository = projectRepo[1];
+                    url = `http://localhost:8080/${window.system}/project/${project}/repository/${repository}/from/${from}/to/${to}`;
+                }
+                window.barChartData.labels = [];
+                window.barChartData.datasets[0] = {
+                    borderWidth: 1,
+                    borderColor: window.chartColors.red,
+                    backgroundColor: color(window.chartColors.orange).alpha(0.5).rgbString(),
+                    data: [],
+                    label: "Modifications from " + window.system + " of project " + source
+                };
+                window.myBar.update();
+                $.getJSON(url, function (json) {
+                    for (var i = 0; i < json.length; i++) {
+                        var user = json[i];
+                        window.barChartData.labels[i] = user['user'].id;
+                        window.barChartData.datasets[0].data[i] = user['stats'];
+                    }
+                    window.myBar.options['tooltips']['callbacks'] = {
+                        footer: function(tooltipItems, data) {
+                            return json[tooltipItems[0].index]['user'].name;
+                        }
+                    };
+                    window.myBar.update();
+                });
+            }
 		});
 
 		function fillSpaces(source) {
             $.getJSON("http://localhost:8080/" + source, function(data) {
-                $("#spaces").empty(); // Remove all <option> child tags.
+                $("#source").empty(); // Remove all <option> child tags.
                 $.each(data, function(index, item) { // Iterates through a collection
-                    $("#spaces").append( // Append an object to the inside of the select box
+                    $("#source").append( // Append an object to the inside of the select box
                         $("<option></option>") // Yes you can do this.
                             .text(item)
                             .val(item)
@@ -71,15 +112,30 @@
 		}
 
 		window.onload = function() {
-			var ctx = document.getElementById('canvas').getContext('2d');
+			var ctx = $('#statistics')[0].getContext('2d');
 			window.myBar = new Chart(ctx, {
 				type: 'bar',
 				data: barChartData,
 				options: {
 					responsive: true,
 					legend: {
-						position: 'top'
+						position: 'top',
 					},
+                    tooltips: {
+                        mode: 'index',
+                        callbacks: {},
+                        footerFontStyle: 'normal'
+                    },
+                    scales: {
+                        yAxes: [{
+                            ticks: {
+                                beginAtZero:true
+                            }
+                        }],
+                        xAxes: [{
+                            display: false
+                        }]
+                    },
 					title: {
 						display: true,
 						text: ''
@@ -88,10 +144,6 @@
 			});
 
 		};
-
-		document.getElementById('display').addEventListener('click', function() {
-            window.myBar.update();
-		});
     </script>
 </body>
 </html>
