@@ -34,14 +34,18 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 
-val client = HttpClient(Apache) {
-    install(JsonFeature) {
-        serializer = GsonSerializer {
-            serializeNulls()
-            disableHtmlEscaping()
-        }
-    }
-}
+val FISH_EYE_URL = System.getProperty("fisheye")!!
+val FISH_EYE_URL_REST = "$FISH_EYE_URL/rest-service-fe"
+val CONFLUENCE_URL = System.getProperty("confluence")!!
+val CONFLUENCE_URL_REST = "$CONFLUENCE_URL/rest/api"
+val JIRA_URL = System.getProperty("jira")!!
+val JIRA_URL_REST = "$JIRA_URL/rest/api/2"
+val BITBUCKET_URL = System.getProperty("bitbucket")!!
+val BITBUCKET_URL_REST = "$BITBUCKET_URL/rest/api/1.0"
+const val DATA_FORMAT = "yyyy-MM-dd"
+const val DATA_FORMAT_CONFLUENCE = "yyyy/MM/dd"
+val DATA_FORMATTER = DateTimeFormatter.ofPattern(DATA_FORMAT)!!
+val DATA_FORMATTER_CONFLUENCE = DateTimeFormatter.ofPattern(DATA_FORMAT_CONFLUENCE)!!
 
 fun main(args: Array<String>) {
     val password = args[0]
@@ -70,7 +74,7 @@ fun main(args: Array<String>) {
                         long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
             }
             static("sniffer") {
-                staticRootFolder = File(System.getProperty("path"))
+                staticRootFolder = File(System.getProperty("user.dir") + File.separator  + "src" + File.separator + "main")
                 files("resources")
                 default("resources" + File.separator +"ui.html")
             }
@@ -102,17 +106,6 @@ fun main(args: Array<String>) {
 //    }
     //println(readFishCommittedLines("thinkpipes", start, end, requestAttributes))
 }
-
-val FISH_EYE_URL = System.getProperty("fisheye")!!
-val FISH_EYE_URL_REST = "$FISH_EYE_URL/rest-service-fe"
-val CONFLUENCE_URL = System.getProperty("confluence")!!
-val CONFLUENCE_URL_REST = "$CONFLUENCE_URL/rest/api"
-val JIRA_URL = System.getProperty("jira")!!
-val JIRA_URL_REST = "$JIRA_URL/rest/api/2"
-val BITBUCKET_URL = System.getProperty("bitbucket")!!
-val BITBUCKET_URL_REST = "$BITBUCKET_URL/rest/api/1.0"
-const val DATA_FORMAT = "yyyy-MM-dd"
-val DATA_FORMATTER = DateTimeFormatter.ofPattern(DATA_FORMAT)!!
 
 // select revisions where date in [2008-03-08, 2008-04-08]
 // https://confluence.atlassian.com/fisheye/eyeql-reference-guide-298976796.html?_ga=2.197841449.789708941.1533913490-493128539.1533552482
@@ -164,10 +157,10 @@ suspend fun resolveFisheyeUsers(emailLines: Map<String, Int>, requestAttributes:
 //  https://docs.atlassian.com/ConfluenceServer/rest/6.10.1/#content-getContentById
 suspend fun readConfluenceContentModifications(space: String?, fromTime: Long?, toTime: Long?,
                                                requestAttributes: Map<String, String>): List<UserStats> {
-    val from = formatTime(fromTime ?: 0)
-    val to = formatTime(toTime ?: 0)
-    val query = URLEncoder.encode("space=$space and (lastmodified >= $from and lastmodified <= $to " +
-            "or created >= $from and created <= $to)", "utf-8")
+    val from = formatTime(fromTime ?: 0, DATA_FORMATTER_CONFLUENCE)
+    val to = formatTime(toTime ?: 0, DATA_FORMATTER_CONFLUENCE)
+    val query = URLEncoder.encode("space=$space and (lastmodified >= \"$from\" and lastmodified <= \"$to\" " +
+            "or created >= \"$from\" and created <= \"$to\")", "utf-8")
     val statistics = get("$CONFLUENCE_URL_REST/content/search?cql=$query&expand=version", requestAttributes)
     val writtenLines: MutableMap<User, Int> = mutableMapOf()
     for (result in jA(jO(statistics)["results"])) {
@@ -178,9 +171,9 @@ suspend fun readConfluenceContentModifications(space: String?, fromTime: Long?, 
     return writtenLines.map{ (k,v) -> UserStats(k, v) }.toList()
 }
 
-suspend fun readConfluenceSpaces(requestAttributes: Map<String, String>): Set<String> {
+suspend fun readConfluenceSpaces(requestAttributes: Map<String, String>): List<String> {
     val spaces = get("$CONFLUENCE_URL_REST/space?limit=300&type=global", requestAttributes).asJsonObject
-    return (spaces["results"]).asJsonArray.map { result -> (result.asJsonObject)["key"].asString }.toSet()
+    return (spaces["results"]).asJsonArray.map { result -> (result.asJsonObject)["key"].asString }.toList().sorted()
 }
 
 // jira
@@ -208,10 +201,10 @@ suspend fun readJiraProjects(requestAttributes: Map<String, String>): Set<String
     return projects.map { p -> jO(p)["key"].asString }.toSet()
 }
 
-suspend fun readBitbucketProjects(requestAttributes: Map<String, String>): Set<String> {
+suspend fun readBitbucketProjects(requestAttributes: Map<String, String>): List<String> {
     val repos = blockingGet("$BITBUCKET_URL_REST/repos?limit=200", requestAttributes).asJsonObject["values"].asJsonArray
     return repos.filter { repo -> jO(jO(repo)["project"])["type"].asString != "PERSONAL" }
-            .map { repo -> jO(jO(repo)["project"])["key"].asString + "/" + jO(repo)["slug"].asString }.toSet()
+            .map { repo -> jO(jO(repo)["project"])["key"].asString + "/" + jO(repo)["slug"].asString }.toList().sorted()
 }
 
 // https://tosgit.iteclientsys.local/rest/api/1.0/projects/tos/repos/alertmanagement/branches?limit=200
@@ -274,6 +267,14 @@ fun blockingGet(url: String, requestAttributes: Map<String, String>): JsonElemen
 }
 
 suspend fun get(url: String, requestAttributes: Map<String, String>): JsonElement {
+    val client = HttpClient(Apache) {
+        install(JsonFeature) {
+            serializer = GsonSerializer {
+                serializeNulls()
+                disableHtmlEscaping()
+            }
+        }
+    }
     return client.get(url) {
         accept(ContentType.Application.Json)
         headers {
@@ -288,4 +289,7 @@ data class UserStats(val user: User, val stats: Int)
 fun jO(any: Any): JsonObject = any as JsonObject
 fun jA(any: Any): JsonArray = any as JsonArray
 fun long(value: String?) = value?.toLong() ?: 0
-fun formatTime(time: Long) = DATA_FORMATTER.format(LocalDateTime.ofInstant(Instant.ofEpochMilli(time), ZoneOffset.UTC))
+fun formatTime(time: Long) = formatTime(time, DATA_FORMATTER)
+fun formatTime(time: Long, dateTimeFormatter: DateTimeFormatter) =
+        dateTimeFormatter.format(LocalDateTime.ofInstant(Instant.ofEpochMilli(time),
+        ZoneOffset.ofHours(3)))
