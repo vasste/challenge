@@ -23,9 +23,7 @@ import io.ktor.routing.get
 import io.ktor.routing.routing
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
-import kotlinx.coroutines.experimental.Deferred
-import kotlinx.coroutines.experimental.async
-import kotlinx.coroutines.experimental.runBlocking
+import kotlinx.coroutines.experimental.*
 import java.io.File
 import java.net.URLEncoder
 import java.time.Instant
@@ -217,10 +215,13 @@ suspend fun readBitbucketCommits(project: String?, repository: String?, fromTime
     val commitUserList : MutableList<Deferred<Map<String, User>>> = ArrayList()
     val userCommits : MutableMap<User, Int> = HashMap()
 
+    val IO = newFixedThreadPoolContext(branches.size(), "IO")
     for(branch in branches) {
         val lastCommitSHA = branch.asJsonObject["latestCommit"].asString
         commitUserList.add(async {
-            readBranchCommits(project, repository, lastCommitSHA, fromTime, toTime, requestAttributes)
+            withContext(IO) {
+                readBranchCommits(project, repository, lastCommitSHA, fromTime, toTime, requestAttributes)
+            }
         })
     }
     for(commitUser in commitUserList) {
@@ -228,6 +229,7 @@ suspend fun readBitbucketCommits(project: String?, repository: String?, fromTime
             userCommits[u] = userCommits.getOrDefault(u, 0) + 1
         }
     }
+    IO.close()
     return userCommits.map{ (k,v) -> UserStats(k, v) }.toList()
 }
 
