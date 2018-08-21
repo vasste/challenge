@@ -215,7 +215,7 @@ suspend fun readBitbucketCommits(project: String?, repository: String?, fromTime
     val commitUserList : MutableList<Deferred<Map<String, User>>> = ArrayList()
     val userCommits : MutableMap<User, Int> = HashMap()
 
-    val IO = newFixedThreadPoolContext(branches.size(), "IO")
+    val IO = newFixedThreadPoolContext(branches.size()/2, "IO")
     for(branch in branches) {
         val lastCommitSHA = branch.asJsonObject["latestCommit"].asString
         commitUserList.add(async {
@@ -243,6 +243,7 @@ suspend fun readBranchCommits(project: String?, repository: String?, lastCommit:
     out@ while (true) {
         val url = "$BITBUCKET_URL_REST/projects/$project/repos/$repository/commits?merges=exclude&limit=$limit&start=$start&until=$lastCommit"
         val values = blockingGet(url, requestAttributes)
+        if (values.asJsonObject["values"] == null) continue
         val commits = values.asJsonObject["values"].asJsonArray
         if (commits.size() == 0 || values.asJsonObject["isLastPage"].asBoolean) break
         for (commit in commits) {
