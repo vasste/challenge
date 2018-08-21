@@ -215,7 +215,7 @@ suspend fun readBitbucketCommits(project: String?, repository: String?, fromTime
     val commitUserList : MutableList<Deferred<Map<String, User>>> = ArrayList()
     val userCommits : MutableMap<User, Int> = HashMap()
 
-    val IO = newFixedThreadPoolContext(branches.size()/2, "IO")
+    val IO = newFixedThreadPoolContext(Math.max(branches.size()/2, 5), "IO")
     for(branch in branches) {
         val lastCommitSHA = branch.asJsonObject["latestCommit"].asString
         commitUserList.add(async {
