@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pull Requests graph</title>
+    <link rel="stylesheet" href="http://localhost:8080/sniffer/datepickk.css">
+    <script src="http://localhost:8080/sniffer/datepickk.js"></script>
+    <script src="https://code.jquery.com/jquery-3.3.1.js"
+            integrity="sha256-2Kok7MbOyxpgUVvAk/HJ2jigOSYS2auK4Pfzbm7uH60="
+            crossorigin="anonymous"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css" rel="stylesheet" type="text/css"/>
+    <style>
+        #mynetwork {
+            width: 2000px;
+            height: 2000px;
+        }
+        #loader {
+            float: left;
+        }
+        .loader {
+            border: 6px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 6px solid #3498db;
+            width: 20px;
+            height: 20px;
+            -webkit-animation: spin 2s linear infinite; /* Safari */
+            animation: spin 2s linear infinite;
+            align: left;
+        }
+        @-webkit-keyframes spin {9
+            0% { -webkit-transform: rotate(0deg); }
+            100% { -webkit-transform: rotate(360deg); }
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body style="width: 100%; height: 100%;" >
+<button id="display">display</button>
+<select id="source"></select>
+<div id="loader" class="loader"></div>
+<div id="demoPicker" style="width:20%"></div>
+<div id="mynetwork"></div>
+<script>
+    $("#loader").hide();
+    fillSpaces("bitbucket");
+    function fillSpaces(source) {
+        $("#loader").show();
+        $.getJSON("http://localhost:8080/" + source, function(data) {
+            $("#source").empty(); // Remove all <option> child tags.
+            $.each(data, function(index, item) { // Iterates through a collection
+                $("#source").append( // Append an object to the inside of the select box
+                    $("<option></option>") // Yes you can do this.
+                        .text(item)
+                        .val(item)
+                );
+            });
+            $("#loader").hide();
+        });
+    }
+    var demoPicker = new Datepickk({ container: $('#demoPicker')[0], inline:true, range: true });
+    $('#display').click(function() {
+        if (demoPicker.selectedDates.length > 1) {
+            $("#loader").show();
+            var from = demoPicker.selectedDates[0].getTime();
+            var to = demoPicker.selectedDates[1].getTime();
+            var source = $('#source').val();
+            var projectRepo = source.split("/");
+            var project = projectRepo[0];
+            var repository = projectRepo[1];
+            url = `http://localhost:8080/pull-requests/project/${project}/repository/${repository}/from/${from}/to/${to}`;
+            $.getJSON(url, function (json) {
+                var names = [];
+                var nodesSource = [];
+                var edgesSource = [];
+                var edgesMap = [];
+                var id = 0;
+                for (var i = 0; i < json.length; i++) {
+                    var pullRequest = json[i];
+                    var creatorId = id;
+                    if (names[pullRequest["creator"]["name"]] == null) {
+                        names[pullRequest["creator"]["name"]] = id;
+                        nodesSource.push({id: id++, label: pullRequest["creator"]["name"]});
+                    } else {
+                        creatorId = names[pullRequest["creator"]["name"]]
+                    }
+                    for (var x = 0; x < pullRequest["reviewers"].length; x++) {
+                        var reviewer = pullRequest["reviewers"][x];
+                        var reviewerId = id;
+                        if (names[reviewer["name"]] == null) {
+                            names[reviewer["name"]] = id;
+                            nodesSource.push({id: id++, label: reviewer["name"]});
+                        } else {
+                            reviewerId = names[reviewer["name"]];
+                        }
+                        edgesSource.push({from: creatorId, to: reviewerId, arrows:'to, from'})
+                    }
+                }
+                var nodes = new vis.DataSet(nodesSource);
+                var edges = new vis.DataSet(edgesSource);
+                var data = {
+                    nodes: nodes,
+                    edges: edges
+                };
+                var options = {};
+                var container = document.getElementById('mynetwork');
+                var network = new vis.Network(container, data, options);
+                $("#loader").hide();
+            });
+        }
+    });
+    function downloadImage()
+    {
+        var canvas = document.getElementById("thecanvas");
+        var image = canvas.toDataURL();
+
+        var aLink = document.createElement('a');
+        var evt = document.createEvent("HTMLEvents");
+        evt.initEvent("click");
+        aLink.download = 'image.png';
+        aLink.href = image;
+        aLink.dispatchEvent(evt);
+    }
+</script>
+</body>
+</html>

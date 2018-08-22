@@ -32,13 +32,13 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 
-val FISH_EYE_URL = System.getProperty("fisheye")!!
+val FISH_EYE_URL = System.getProperty("fisheye")?: "https://tosfish.iteclientsys.local"
 val FISH_EYE_URL_REST = "$FISH_EYE_URL/rest-service-fe"
-val CONFLUENCE_URL = System.getProperty("confluence")!!
+val CONFLUENCE_URL = System.getProperty("confluence") ?: "https://tosconf.iteclientsys.local"
 val CONFLUENCE_URL_REST = "$CONFLUENCE_URL/rest/api"
-val JIRA_URL = System.getProperty("jira")!!
+val JIRA_URL = System.getProperty("jira")?: "https://tosjira.iteclientsys.local"
 val JIRA_URL_REST = "$JIRA_URL/rest/api/2"
-val BITBUCKET_URL = System.getProperty("bitbucket")!!
+val BITBUCKET_URL = System.getProperty("bitbucket") ?: "https://tosgit.iteclientsys.local"
 val BITBUCKET_URL_REST = "$BITBUCKET_URL/rest/api/1.0"
 const val DATA_FORMAT = "yyyy-MM-dd"
 const val DATA_FORMAT_CONFLUENCE = "yyyy/MM/dd"
@@ -69,6 +69,10 @@ fun main(args: Array<String>) {
             }
             get("/bitbucket/project/{project}/repository/{repository}/from/{from}/to/{to}") { request ->
                 call.respond(readBitbucketCommits(call.parameters["project"], call.parameters["repository"],
+                        long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
+            }
+            get("/pull-requests/project/{project}/repository/{repository}/from/{from}/to/{to}") { request ->
+                call.respond(readPullRequests(call.parameters["project"], call.parameters["repository"],
                         long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
             }
             static("sniffer") {
@@ -205,6 +209,37 @@ suspend fun readBitbucketProjects(requestAttributes: Map<String, String>): List<
             .map { repo -> jO(jO(repo)["project"])["key"].asString + "/" + jO(repo)["slug"].asString }.toList().sorted()
 }
 
+suspend fun readPullRequests(project: String?, repository: String?, fromTime: Long?, toTime: Long?,
+                             requestAttributes: Map<String, String>): List<PullRequest> {
+    var start = 0
+    val limit = 50
+    val from = fromTime?:0
+    val to = toTime?:0
+    val pullRequests : MutableList<PullRequest> = ArrayList()
+    out@ while (true) {
+        val url = "$BITBUCKET_URL_REST/projects/$project/repos/$repository/pull-requests?state=ALL&limit=$limit&start=$start"
+        val pullRequestsRes = blockingGet(url, requestAttributes).asJsonObject
+        val pullRequestsArray = pullRequestsRes.asJsonObject["values"].asJsonArray
+        if (pullRequestsArray.size() == 0) break
+        for (pullRequest in pullRequestsArray) {
+            val pullRequestTime = jO(pullRequest)["updatedDate"].asString.toLong()
+            if (pullRequestTime > to) continue
+            if (pullRequestTime < from)
+                break@out
+            val userJson = jO(pullRequest)["author"].asJsonObject["user"].asJsonObject
+            val creator = User(userJson["name"].asString, userJson["displayName"].asString)
+            pullRequests.add(PullRequest(creator, jO(pullRequest)["reviewers"].asJsonArray
+                .filter { rv -> rv.asJsonObject["approved"].asBoolean }
+                .map { rv -> rv.asJsonObject["user"].asJsonObject }
+                .map { jrv -> User(jrv["name"].asString, jrv["displayName"].asString) }
+               .toSet()))
+        }
+        if (pullRequestsRes["isLastPage"].asBoolean) break
+        start += limit
+    }
+    return pullRequests
+}
+
 // https://tosgit.iteclientsys.local/rest/api/1.0/projects/tos/repos/alertmanagement/branches?limit=200
 // https://tosgit.iteclientsys.local/rest/api/1.0/projects/tos/repos/alertmanagement/commits?until=release/1934_cucumber&merges=exclude
 suspend fun readBitbucketCommits(project: String?, repository: String?, fromTime: Long?, toTime: Long?,
@@ -288,6 +323,7 @@ suspend fun get(url: String, requestAttributes: Map<String, String>): JsonElemen
 
 data class User(val id: String, val name: String, val email: String = "")
 data class UserStats(val user: User, val stats: Int)
+data class PullRequest(val creator: User, val reviewers: Set<User>)
 
 fun jO(any: Any): JsonObject = any as JsonObject
 fun jA(any: Any): JsonArray = any as JsonArray
