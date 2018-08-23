@@ -290,7 +290,7 @@ suspend fun readBranchCommits(project: String?, repository: String?, lastCommit:
             val commitUserSHA = jO(commit)["id"].asString
             if (commitUser[commitUserSHA] == null) {
                 val author = jO(commit)["author"].asJsonObject
-                val user = User(author["name"].asString, author["displayName"].asString)
+                val user = User(author["name"].asString, author["displayName"]?.asString ?: "")
                 commitUser[commitUserSHA] = user
             }
         }

@@ -24,7 +24,7 @@ dependencies {
     compile "org.jetbrains.kotlinx:kotlinx-coroutines-core:$kotlinxCoroutines"
 
     compile "org.slf4j:slf4j-api:1.6.1"
-    compile "org.slf4j:slf4j-simple:1.6.1"
+    compile "ch.qos.logback:logback-classic:1.2.1"
 }
 
 kotlin.experimental.coroutines = 'enable'
