@@ -15,6 +15,7 @@ import io.ktor.content.default
 import io.ktor.content.files
 import io.ktor.content.static
 import io.ktor.content.staticRootFolder
+import io.ktor.features.CallLogging
 import io.ktor.features.ContentNegotiation
 import io.ktor.gson.gson
 import io.ktor.http.ContentType
@@ -49,29 +50,30 @@ fun main(args: Array<String>) {
     val password = args[0]
     val requestAttributes = mapOf(Pair("Authorization", "Basic $password"))
     val server = embeddedServer(Netty, port = 8080) {
+        install(CallLogging)
         install(ContentNegotiation) {
             gson {
                 // Configure Gson here
             }
         }
         routing {
-            get("/jira/source/{source}/from/{from}/to/{to}") { request ->
+            get("/sniffer/jira/source/{source}/from/{from}/to/{to}") { request ->
                 call.respond(readJiraContentModifications(call.parameters["source"],
                         long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
             }
-            get("/confluence/source/{source}/from/{from}/to/{to}") { request ->
+            get("/sniffer/confluence/source/{source}/from/{from}/to/{to}") { request ->
                     call.respond(readConfluenceContentModifications(call.parameters["source"],
                             long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
             }
-            get("/fisheye/source/{source}/from/{from}/to/{to}") { request ->
+            get("/sniffer/fisheye/source/{source}/from/{from}/to/{to}") { request ->
                     call.respond(readFishCommittedLines(call.parameters["source"],
                             long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
             }
-            get("/bitbucket/project/{project}/repository/{repository}/from/{from}/to/{to}") { request ->
+            get("/sniffer/bitbucket/project/{project}/repository/{repository}/from/{from}/to/{to}") { request ->
                 call.respond(readBitbucketCommits(call.parameters["project"], call.parameters["repository"],
                         long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
             }
-            get("/pull-requests/project/{project}/repository/{repository}/from/{from}/to/{to}") { request ->
+            get("/sniffer/pull-requests/project/{project}/repository/{repository}/from/{from}/to/{to}") { request ->
                 call.respond(readPullRequests(call.parameters["project"], call.parameters["repository"],
                         long(call.parameters["from"]), long(call.parameters["to"]), requestAttributes))
             }
@@ -80,16 +82,16 @@ fun main(args: Array<String>) {
                 files("resources")
                 default("resources" + File.separator +"ui.html")
             }
-            get("/confluence") {
+            get("/sniffer/confluence") {
                 call.respond(readConfluenceSpaces(requestAttributes))
             }
-            get("/jira") {
+            get("/sniffer/jira") {
                 call.respond(readJiraProjects(requestAttributes))
             }
-            get("/fisheye") {
+            get("/sniffer/fisheye") {
                 call.respond(readFisheyeRepositories(requestAttributes))
             }
-            get("/bitbucket") {
+            get("/sniffer/bitbucket") {
                 call.respond(readBitbucketProjects(requestAttributes))
             }
         }

@@ -1,5 +1,6 @@
 plugins {
     id "org.jetbrains.kotlin.jvm" version "1.2.60"
+    id "application"
 }
 
 group 'singlton'
@@ -27,3 +28,5 @@ dependencies {
 }
 
 kotlin.experimental.coroutines = 'enable'
+
+mainClassName = "ChallengeServerKt"

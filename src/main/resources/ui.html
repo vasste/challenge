@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <title>Sniffer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.7.2/Chart.bundle.js"></script>
-    <link rel="stylesheet" href="http://localhost:8080/sniffer/datepickk.css">
-    <script src="http://localhost:8080/sniffer/datepickk.js"></script>
+    <link rel="stylesheet" href="sniffer/datepickk.css">
+    <script src="sniffer/datepickk.js"></script>
     <script src="https://code.jquery.com/jquery-3.3.1.js"
             integrity="sha256-2Kok7MbOyxpgUVvAk/HJ2jigOSYS2auK4Pfzbm7uH60="
             crossorigin="anonymous"></script>
@@ -40,8 +40,7 @@
     </style>
 </head>
 <body>
-    <div id="demoPicker" style="width:20%">
-    </div>
+    <div id="demoPicker" style="width:20%"></div>
     <div id="right" style="width:80%">
         <select id="source"></select>
         <button id="jira">jira</button>
@@ -49,6 +48,7 @@
         <button id="bitbucket">bitbucket</button>
         <button id="confluence">confluence</button>
         <button id="display">display</button>
+        <a href="review.html">Pull requests graph</a>
         <div id="loader" class="loader"></div>
         <canvas id="statistics"></canvas>
     </div>
@@ -89,12 +89,12 @@
                 var source = $('#source').val();
                 var from = demoPicker.selectedDates[0].getTime();
                 var to = demoPicker.selectedDates[1].getTime();
-                var url = `http://localhost:8080/${window.system}/source/${source}/from/${from}/to/${to}`;
+                var url = `sniffer/${window.system}/source/${source}/from/${from}/to/${to}`;
                 if (window.system === "bitbucket") {
                     var projectRepo = source.split("/");
                     var project = projectRepo[0];
                     var repository = projectRepo[1];
-                    url = `http://localhost:8080/${window.system}/project/${project}/repository/${repository}/from/${from}/to/${to}`;
+                    url = `sniffer/${window.system}/project/${project}/repository/${repository}/from/${from}/to/${to}`;
                 }
                 initChart("Modifications from " + window.system + " of project " + source);
 
@@ -135,7 +135,7 @@
 
 		function fillSpaces(source) {
 		    $("#loader").show();
-            $.getJSON("http://localhost:8080/" + source, function(data) {
+            $.getJSON("sniffer/" + source, function(data) {
                 $("#source").empty(); // Remove all <option> child tags.
                 $.each(data, function(index, item) { // Iterates through a collection
                     $("#source").append( // Append an object to the inside of the select box

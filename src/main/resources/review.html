@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <title>Pull Requests graph</title>
-    <link rel="stylesheet" href="http://localhost:8080/sniffer/datepickk.css">
-    <script src="http://localhost:8080/sniffer/datepickk.js"></script>
+    <link rel="stylesheet" href="sniffer/datepickk.css">
+    <script src="sniffer/datepickk.js"></script>
     <script src="https://code.jquery.com/jquery-3.3.1.js"
             integrity="sha256-2Kok7MbOyxpgUVvAk/HJ2jigOSYS2auK4Pfzbm7uH60="
             crossorigin="anonymous"></script>
@@ -28,7 +28,7 @@
             animation: spin 2s linear infinite;
             align: left;
         }
-        @-webkit-keyframes spin {9
+        @-webkit-keyframes spin {
             0% { -webkit-transform: rotate(0deg); }
             100% { -webkit-transform: rotate(360deg); }
         }
@@ -49,7 +49,7 @@
     fillSpaces("bitbucket");
     function fillSpaces(source) {
         $("#loader").show();
-        $.getJSON("http://localhost:8080/" + source, function(data) {
+        $.getJSON("" + source, function(data) {
             $("#source").empty(); // Remove all <option> child tags.
             $.each(data, function(index, item) { // Iterates through a collection
                 $("#source").append( // Append an object to the inside of the select box
@@ -71,7 +71,7 @@
             var projectRepo = source.split("/");
             var project = projectRepo[0];
             var repository = projectRepo[1];
-            url = `http://localhost:8080/pull-requests/project/${project}/repository/${repository}/from/${from}/to/${to}`;
+            url = `sniffer/pull-requests/project/${project}/repository/${repository}/from/${from}/to/${to}`;
             $.getJSON(url, function (json) {
                 var names = [];
                 var nodesSource = [];
